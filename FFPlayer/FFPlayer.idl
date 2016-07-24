@@ -1,0 +1,53 @@
+// FFPlayer.idl : ActiveX 控件项目的类型库源。
+
+// 此文件将由 MIDL 编译器工具处理以
+// 产生类型库(FFPlayer.tlb)，该类型库将成为
+// FFPlayer.ocx.
+
+#include <olectl.h>
+#include <idispids.h>
+
+[ uuid(068E4E07-E348-44A0-89A4-AE863AC23D3C), version(1.0),
+  control ]
+library FFPlayerLib
+{
+	importlib(STDOLE_TLB);
+
+	//  CFFPlayerCtrl 的主调度接口
+	[ 
+		uuid(7307DBF7-2885-4DB9-BE54-652066C5BFB0)	
+	]
+	dispinterface _DFFPlayer
+	{
+		properties:
+		methods:
+
+			[id(DISPID_ABOUTBOX)] void AboutBox();
+			[id(1)] void Start(BSTR strUrl, LONG nPort, LONG nNum);
+			[id(2)] void SetChannel(VARIANT_BOOL bSelected);
+	};
+
+	//  CFFPlayerCtrl 的事件调度接口
+
+	[ 
+		uuid(456F141F-72AC-472E-8758-D36C4740EE34)	
+	]
+	dispinterface _DFFPlayerEvents
+	{
+		properties:
+			//  事件接口没有任何属性
+
+		methods:
+	};
+
+	//  CFFPlayerCtrl 的类信息
+	[
+		uuid(81997F5C-2444-4106-AE8D-167F47F70C57)
+	]
+	coclass FFPlayer
+	{
+		[default] dispinterface _DFFPlayer;
+		[default, source] dispinterface _DFFPlayerEvents;
+	};
+
+};
