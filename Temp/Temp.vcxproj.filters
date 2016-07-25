@@ -33,6 +33,12 @@
     <ClInclude Include="Decoder.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="D3DRender.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Wave.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -48,6 +54,12 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="Decoder.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="D3DRender.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Wave.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

@@ -2,9 +2,9 @@
 #include "Program.h"
 #include <iostream>
 
-CProgram::CProgram(int id, AVFormatContext* ic)
-	: m_id(id)
-	, m_fmt_ctx(ic)
+CProgram::CProgram()
+	: m_id(-1)
+	, m_fmt_ctx(NULL)
 	, m_videoIndex(-1)
 	, m_audioIndex(-1)
 	, m_pVideoCodecCtx(NULL)
@@ -12,12 +12,15 @@ CProgram::CProgram(int id, AVFormatContext* ic)
 	, m_pAudioCodecCtx(NULL)
 	, m_pAudioCodec(NULL)
 	, m_bRun(false)
+	, m_hWnd(NULL)
 {
+	memset(&m_wavefmt, 0, sizeof(m_wavefmt));
 }
 
 
 CProgram::~CProgram()
 {
+	StopDecoder();
 }
 
 void CProgram::SetStreamIndex(int index, AVMediaType type)
@@ -93,6 +96,8 @@ bool CProgram::InnerOpenVideoCodec(void)
 		return false;
 	}
 
+	m_video_dec.Init(m_pVideoCodecCtx);
+
 	return true;
 }
 
@@ -123,6 +128,8 @@ bool CProgram::InnerOpenAudioCodec(void)
 		return false;
 	}
 
+	m_audio_dec.Init(m_pAudioCodecCtx);
+
 	return true;
 }
 
@@ -151,6 +158,26 @@ bool CProgram::StartDecoder(void)
 
 int CProgram::DecoderThread()
 {
+	while (m_bRun)
+	{
+		if (m_pkt.empty())
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(40));
+			continue;
+		}
+
+		AVPacket pkt = GetPacket();
+		if (pkt.stream_index == m_audioIndex)
+		{
+			m_audio_dec.Decoder(pkt);
+		}
+		else if (pkt.stream_index == m_videoIndex)
+		{
+			m_video_dec.Decoder(pkt);
+		}
+		else
+			;
+	}
 
 	return 0;
 }
@@ -165,4 +192,71 @@ void CProgram::StopDecoder(void)
 	}
 
 	m_pktMutex.reset();
+}
+
+AVPacket&& CProgram::GetPacket(void)
+{
+	std::lock_guard<std::mutex> lock(*m_pktMutex);
+	AVPacket pkt = m_pkt.front();
+	m_pkt.pop_front();
+
+	return std::move(pkt);
+}
+
+int CProgram::Init(int id, AVFormatContext* ic, RECT rt, HWND hWnd)
+{
+	m_id = id;
+	m_fmt_ctx = ic;
+	m_video_rt = rt;
+	m_hWnd = hWnd;
+
+	m_video_render.init_render(m_hWnd, rt.right - rt.left, rt.bottom - rt.top, 1);
+
+	return 0;
+}
+
+int CProgram::DisplayVideoThread()
+{
+	while (m_bRun)
+	{
+		AVFrame* frame = m_video_dec.GetFrame();
+		if (!frame)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			continue;
+		}
+
+		m_video_render.render_one_frame(frame, m_video_rt, false);
+	}
+
+	return 0;
+}
+
+int CProgram::DisplayAudioThread()
+{
+	while (m_bRun)
+	{
+		AVFrame* frame = m_audio_dec.GetFrame();
+		if (!frame)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			continue;
+		}
+		if (frame->channels != m_wavefmt.nChannels 
+			|| frame->sample_rate != m_wavefmt.nSamplesPerSec)
+		{
+			m_wavefmt.nChannels = frame->channels;
+			m_wavefmt.nSamplesPerSec = frame->sample_rate;
+			m_wavefmt.cbSize = sizeof(WAVEFORMATEX);
+			m_wavefmt.wBitsPerSample = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
+			m_wavefmt.nBlockAlign = m_wavefmt.wBitsPerSample / 8 * m_wavefmt.nChannels;
+			m_wavefmt.nAvgBytesPerSec = m_wavefmt.nBlockAlign * m_wavefmt.nSamplesPerSec; //每秒播放字节数
+		
+			m_audio_play.Start(&m_wavefmt);
+		}
+
+		//m_audio_play.Play(frame->extended_data,frame->nb_samples)
+	}
+
+	return 0;
 }

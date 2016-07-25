@@ -11,17 +11,21 @@ extern "C"{
 class CDecoder
 {
 public:
-	CDecoder(AVCodecContext* pCtx);
+	CDecoder();
 	~CDecoder();
 public:
+	int Init(AVCodecContext* pCtx);
 	int Decoder(AVPacket pkt);
-	AVFrame GetFrame(void);
+	AVFrame* GetFrame(void);
 protected:
-	void InnerPutFrame(AVFrame&& frame);
+	void InnerPutFrame(AVFrame* frame);
+	bool AudioReSample(AVFrame* frame);
 private:
 	AVCodecContext* m_pCodecCtx;
+	struct SwrContext *m_audio_swr_ctx; //音频转换指针
+	struct SwsContext *m_video_sws_ctx; //视频转换指针
 
-	std::deque<AVFrame> m_frame; //解码后的帧
+	std::deque<AVFrame*> m_frame; //解码后的帧
 	std::shared_ptr<std::mutex> m_mutex;
 };
 
