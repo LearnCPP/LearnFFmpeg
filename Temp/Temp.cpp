@@ -7,6 +7,7 @@
 #include<list>
 #include<map>
 #include<windows.h>
+#include<condition_variable>
 #include "Program.h"
 
 using namespace std;
@@ -36,10 +37,16 @@ void g_Error(int nCode, const char* pRest)
 const AVRational G_AV_BASE_TIME_Q = { 1, AV_TIME_BASE };
 
 std::list<CProgram*>g_Program;
-string g_str = "E:/1234.ts"; //文件名
+//string g_str = "E:\\BaiduYunDownload\\moves.mp4"; //文件名
+string g_str = "E:\\BaiduYunDownload\\1234.ts"; //文件名
 AVFormatContext* g_fmt_ctx = NULL;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+int ReadPacketThread();
+std::shared_ptr<std::thread> g_readThread;
+std::shared_ptr<std::mutex> g_waitMutex;
+std::shared_ptr<std::condition_variable> g_wait_cond;
+bool g_run = false;
 
 int _tmain(int argc, _TCHAR* argv[])
 {
@@ -64,10 +71,10 @@ int _tmain(int argc, _TCHAR* argv[])
 		_T("Play"),           //上面注册的类名，要完全一致    
 		_T("播放器"),  //窗口标题文字    
 		WS_OVERLAPPEDWINDOW, //窗口外观样式    
-		30,             //窗口相对于父级的X坐标    
-		20,             //窗口相对于父级的Y坐标    
-		480,                //窗口的宽度    
-		250,                //窗口的高度    
+		0,             //窗口相对于父级的X坐标    
+		0,             //窗口相对于父级的Y坐标    
+		1024,                //窗口的宽度    
+		768,                //窗口的高度    
 		NULL,               //没有父窗口，为NULL    
 		NULL,               //没有菜单，为NULL    
 		hInstance,          //当前应用程序的实例句柄    
@@ -115,12 +122,15 @@ int _tmain(int argc, _TCHAR* argv[])
 	RECT rt[6] = { { 0, 0, 320, 240 }, { 340, 0, 660, 240 }, { 680, 0, 1000, 240 },
 	{ 0, 260, 320, 500 }, { 340, 260, 660, 500 }, { 680, 260, 1000, 500 } };
 
+	g_waitMutex = std::make_shared<std::mutex>();
+	g_wait_cond = std::make_shared<std::condition_variable>();
+
 	int nIndex = 0;
 	while (nIndex < programNum)
 	{
 		AVProgram * pProg = g_fmt_ctx->programs[nIndex];
 		CProgram* prog = new CProgram;
-		prog->Init(pProg->id, g_fmt_ctx, rt[nIndex], hwnd);
+		prog->Init(pProg->id, g_fmt_ctx, rt[nIndex], hwnd, g_wait_cond);
 
 		cout << "Program ID: " << pProg->id << endl;
 		cout << "Program Num: " << pProg->program_num << endl;
@@ -132,31 +142,39 @@ int _tmain(int argc, _TCHAR* argv[])
 			cout << "	stream index: " << streamIndex << " stream type: " << streamType << endl;
 			prog->SetStreamIndex(streamIndex, streamType);
 		}
-		cout << "pmt_id: " << pProg->pmt_pid << endl;
-		cout << "pcr_id: " << pProg->pcr_pid << endl;
-		cout << "start_pts: " << pProg->start_time << endl;
-		double d = pProg->start_time * av_q2d(G_AV_BASE_TIME_Q);
-		cout << "start_time: " << d << endl;
-		cout << "end_pts: " << pProg->end_time << endl;
-		d = pProg->end_time * av_q2d(G_AV_BASE_TIME_Q);
-		cout << "end_time: " << d << endl;
+// 		cout << "pmt_id: " << pProg->pmt_pid << endl;
+// 		cout << "pcr_id: " << pProg->pcr_pid << endl;
+// 		cout << "start_pts: " << pProg->start_time << endl;
+// 		double d = pProg->start_time * av_q2d(G_AV_BASE_TIME_Q);
+// 		cout << "start_time: " << d << endl;
+// 		cout << "end_pts: " << pProg->end_time << endl;
+// 		d = pProg->end_time * av_q2d(G_AV_BASE_TIME_Q);
+// 		cout << "end_time: " << d << endl;
 
+		prog->FindOpenCodec();
 		prog->StartDecoder();
 		g_Program.push_back(prog);
 
 		nIndex++;
 	}
-
-	//查找流信息
-	av_find_best_stream(g_fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
-	int readNum = 100;
-	while (readNum > 0)
+	//不是ts流的情况
+	if (programNum == 0 && streamNum > 0)
 	{
-		av_read_frame(g_fmt_ctx, &packet);
-		cout << packet.stream_index << endl;
-		readNum--;
+		CProgram* prog = new CProgram;
+		prog->Init(0, g_fmt_ctx, rt[0], hwnd, g_wait_cond);
+		for (int i = 0; i < streamNum; ++i)
+		{
+			AVMediaType streamType = g_fmt_ctx->streams[i]->codec->codec_type;
+			cout << "	stream index: " << i << " stream type: " << streamType << endl;
+			prog->SetStreamIndex(i, streamType);
+		}
+		prog->FindOpenCodec();
+		prog->StartDecoder();
+		g_Program.push_back(prog);
 	}
 
+	g_run = true;
+	g_readThread = std::make_shared<std::thread>(std::bind(ReadPacketThread));
 
 	// 消息循环    
 	MSG msg;
@@ -182,9 +200,39 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	{
 	case WM_DESTROY:
 	{
+		g_run = false;
+		g_readThread->join();
+		g_readThread.reset();
+
 		PostQuitMessage(0);
 		return 0;
 	}
 	}
 	return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+int ReadPacketThread()
+{
+	while (g_run)
+	{
+		AVPacket packet;
+		int ret = av_read_frame(g_fmt_ctx, &packet);
+
+		int streamIndex = packet.stream_index;
+		for each (auto var in g_Program)
+		{
+			if (var->IsProgram(streamIndex))
+			{
+				var->SetPacket(&packet);
+				break;
+			}
+		}
+
+		{
+			std::unique_lock<std::mutex> ul(*g_waitMutex);
+			g_wait_cond->wait_for(ul, std::chrono::milliseconds(10)); //wait for 10 ms
+		}
+	}
+
+	return 0;
 }

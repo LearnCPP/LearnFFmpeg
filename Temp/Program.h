@@ -6,6 +6,7 @@
 #include "Decoder.h"
 #include "D3DRender.h"
 #include "Wave.h"
+#include <condition_variable>
 
 #define __STDC_CONSTANT_MACROS
 
@@ -15,7 +16,7 @@ extern "C"{
 };
 
 
-
+const double  AV_SYNC_THRESHOLD_MAX = 0.1; //音视频同步门限，大于则丢帧处理
 
 class CProgram
 {
@@ -24,9 +25,10 @@ public:
 	~CProgram();
 public:
 	//初始化
-	int Init(int id, AVFormatContext* ic, RECT rt, HWND hWnd);
+	int Init(int id, AVFormatContext* ic, RECT rt, HWND hWnd,
+		std::shared_ptr<std::condition_variable> cond);
 	//判断音频或者视频是不是本节目的
-	inline bool IsProgram(int index) const;
+	bool IsProgram(int index) const;
 	//设置此节目视频，音频索引
 	void SetStreamIndex(int index, AVMediaType type);
 	//获取此节目视频，音频索引
@@ -61,16 +63,26 @@ private:
 
 	std::deque<AVPacket>			m_pkt;
 	std::shared_ptr<std::mutex>		m_pktMutex; //队列锁
+	std::shared_ptr<std::mutex>		m_videoPtsMtx; //视频pts锁
+	std::shared_ptr<std::mutex>		m_audioPtsMtx; //音频pts锁
 	std::shared_ptr<std::thread>	m_thread; //解码线程
+	std::shared_ptr<std::thread>	m_videoThread; //video display thread
+	std::shared_ptr<std::thread>	m_audioThread; //audio display thread
 	bool							m_bRun;   //线程退出标记
 	//audio
 	CDecoder						m_audio_dec;//音频解码器
 	CWave							m_audio_play; //音频播放
 	WAVEFORMATEX					m_wavefmt; //音频播放结构体
+	int64_t							m_audio_pts; //音频当前时间戳
 	//video
 	CDecoder						m_video_dec;//视频解码器
 	CD3DRender						m_video_render; //视频渲染
 	RECT							m_video_rt;	//视频位置
 	HWND							m_hWnd; //窗口句柄
+	int64_t							m_video_pts; //视频当前时间戳
+
+	std::weak_ptr<std::condition_variable> m_empty_cond; //
+	//音视频简单同步，以音频为主
+	
 };
 
